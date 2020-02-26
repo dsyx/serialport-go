@@ -49,7 +49,7 @@ func (p *Port) Flush() error {
 func open(cfg *Config) (p *Port, err error) {
 	fd, err := unix.Open(cfg.Name, unix.O_RDWR|unix.O_NOCTTY|unix.O_NONBLOCK, 0666)
 	if err != nil {
-		err = &OpenError{"Name", err.Error()}
+		err = invalidPortError(err)
 		return
 	}
 	// enable receiver, local line - do not change "owner" of port
@@ -80,7 +80,7 @@ func open(cfg *Config) (p *Port, err error) {
 	case B115200:
 		baudrate = unix.B115200
 	default:
-		err = &OpenError{"Baudrate", fmt.Sprintf("not support %d", cfg.Baudrate)}
+		err = invalidValueError("Baudrate", cfg.Baudrate)
 		return
 	}
 	cFlag |= baudrate
@@ -93,7 +93,7 @@ func open(cfg *Config) (p *Port, err error) {
 	case 8:
 		cFlag |= unix.CS8
 	default:
-		err = &OpenError{"DataBits", fmt.Sprintf("not support %d", cfg.DataBits)}
+		err = invalidValueError("DataBits", cfg.DataBits)
 		return
 	}
 	// stop bits
@@ -103,7 +103,7 @@ func open(cfg *Config) (p *Port, err error) {
 	case 2:
 		cFlag |= unix.CSTOPB
 	default:
-		err = &OpenError{"StopBits", fmt.Sprintf("not support %d", cfg.StopBits)}
+		err = invalidValueError("StopBits", cfg.StopBits)
 		return
 	}
 	// parity
@@ -119,7 +119,7 @@ func open(cfg *Config) (p *Port, err error) {
 		cFlag |= unix.PARENB
 		iFlag |= unix.INPCK
 	default:
-		err = &OpenError{"Parity", fmt.Sprintf("not support %d", cfg.Parity)}
+		err = invalidValueError("Parity", cfg.Parity)
 		return
 	}
 	// termios
@@ -144,13 +144,13 @@ func open(cfg *Config) (p *Port, err error) {
 		uintptr(unix.TCSETS),
 		uintptr(unsafe.Pointer(&termios)))
 	if errno != 0 {
-		err = &OpenError{"IOCTL", fmt.Sprintf("errno %v", errno)}
+		err = syscallError(fmt.Sprintf("ioctl errno %v", errno))
 		return
 	}
 	// NewFile
 	file := os.NewFile(uintptr(fd), cfg.Name)
 	if file == nil {
-		err = &OpenError{"NewFile", "fd is not a valid file descriptor"}
+		err = syscallError("fd is not a valid file descriptor")
 		return
 	}
 	return &Port{file: file}, nil

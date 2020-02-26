@@ -1,7 +1,10 @@
 // Package serialport provides some basic access to the serial port.
 package serialport
 
-import "fmt"
+import (
+	"errors"
+	"strconv"
+)
 
 // Baudrate
 const (
@@ -25,6 +28,13 @@ const (
 	EvenParity
 )
 
+// Error Code
+const (
+	InvalidValueErr = iota
+	InvalidPortErr
+	SyscallErr
+)
+
 // Config describes the configuration of the serial port.
 // Name field is the serial port name or its path.
 // Baudrate field is the baudrate. Only Baudrate constant values are supported.
@@ -43,12 +53,13 @@ type Config struct {
 
 // OpenError indicates an error that occurred while opening the serial port.
 type OpenError struct {
-	param string
-	cause string
+	Item string // where the error occurred
+	Code int    // error code
+	Err  error  // reason
 }
 
 func (e *OpenError) Error() string {
-	return fmt.Sprintf("[%s] %s", e.param, e.cause)
+	return e.Item + ": " + e.Err.Error()
 }
 
 // Index of Open args.
@@ -61,6 +72,7 @@ const (
 )
 
 // Open for open a serial port according to the specified name and args.
+// It returns a pointer to Port. If it fails, it returns an error of type *OpenError.
 // args[0]: Baudrate, default B9600
 // args[1]: Timeout, default 100
 // args[2]: Parity, default NoParity
@@ -93,6 +105,31 @@ func Open(name string, args ...int) (p *Port, err error) {
 }
 
 // OpenByConfig for open a serial port according to the specified Config.
+// It returns a pointer to Port. If it fails, it returns an error of type *OpenError.
 func OpenByConfig(cfg *Config) (p *Port, err error) {
 	return open(cfg)
+}
+
+func invalidValueError(item string, value int) *OpenError {
+	return &OpenError{
+		Item: item,
+		Code: InvalidValueErr,
+		Err:  errors.New("not support " + strconv.Itoa(value)),
+	}
+}
+
+func invalidPortError(err error) *OpenError {
+	return &OpenError{
+		Item: "Name",
+		Code: InvalidPortErr,
+		Err:  err,
+	}
+}
+
+func syscallError(info string) *OpenError {
+	return &OpenError{
+		Item: "Syscall",
+		Code: SyscallErr,
+		Err:  errors.New(info),
+	}
 }

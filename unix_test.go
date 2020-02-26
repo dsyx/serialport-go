@@ -17,7 +17,14 @@ func TestEcho(*testing.T) {
 	//	Timeout:  100,
 	//}
 	//port, _ := OpenByConfig(config)
-	port, _ := Open("/dev/ttyS0")
+	port, err := Open("/dev/ttyUSB0")
+	if err != nil {
+		fmt.Println(err)
+	}
+	port, err = Open("/dev/ttyS0")
+	if err != nil {
+		panic(err)
+	}
 	buf := make([]byte, 256)
 	for {
 		n, _ := port.Read(buf)
