@@ -61,6 +61,12 @@ type win32DCB struct {
 	wReserved1 uint16
 }
 
+const (
+	win32ONESTOPBIT   = 0
+	win32ONE5STOPBITS = 1
+	win32TWOSTOPBITS  = 2
+)
+
 var (
 	modkernel32 = windows.NewLazySystemDLL("kernel32.dll")
 
@@ -68,25 +74,18 @@ var (
 	procSetCommState = modkernel32.NewProc("SetCommState")
 )
 
-var dcbByteSizeMap = map[int]uint8{
-	DB5: 5,
-	DB6: 6,
-	DB7: 7,
-	DB8: 8,
+// serialport stopbits to win32 stopbits
+var spToWinStopBitsMap = map[int]uint8{
+	SB1:   win32ONESTOPBIT,
+	SB1_5: win32ONE5STOPBITS,
+	SB2:   win32TWOSTOPBITS,
 }
 
-var dcbStopBitsMap = map[int]uint8{
-	SB1:   0,
-	SB1_5: 1,
-	SB2:   2,
-}
-
-var dcbParityMap = map[int]uint8{
-	PN: 0,
-	PO: 1,
-	PE: 2,
-	PM: 3,
-	PS: 4,
+// win32 stopbits to serialport stopbits
+var winToSpStopBitsMap = map[uint8]int{
+	win32ONESTOPBIT:   SB1,
+	win32ONE5STOPBITS: SB1_5,
+	win32TWOSTOPBITS:  SB2,
 }
 
 func win32GetCommState(handle windows.Handle, dcb *win32DCB) error {
@@ -110,7 +109,8 @@ type SerialPort struct {
 	handle windows.Handle
 }
 
-func open(name string) (sp *SerialPort, err error) {
+// Open opens a serial port.
+func Open(name string, cfg Config) (sp *SerialPort, err error) {
 	handle, err := windows.CreateFile(
 		windows.StringToUTF16Ptr(name),
 		windows.GENERIC_READ|windows.GENERIC_WRITE,
@@ -120,19 +120,14 @@ func open(name string) (sp *SerialPort, err error) {
 		0,
 		0)
 	if err != nil {
-		windows.CloseHandle(handle)
-	}
-	sp = &SerialPort{handle: handle}
-	return
-}
-
-// Open opens a serial port.
-func Open(name string, cfg Config) (sp *SerialPort, err error) {
-	sp, err = open(name)
-	if err != nil {
 		return
 	}
-	err = sp.SetConfig(cfg)
+	sp = &SerialPort{handle: handle}
+
+	if err = sp.SetConfig(cfg); err != nil {
+		sp.Close()
+	}
+
 	return
 }
 
@@ -143,71 +138,56 @@ func (sp *SerialPort) Close() error {
 
 // Read reads up to len(b) bytes from the serial port.
 // It returns the number of bytes (0 <= n <= len(b)) read from the serial port and any errors encountered.
+// Note:
+//     Timeout < 1 ms: Read blocks until len(b) bytes are readable;
+//     Timeout > 1 ms: Read blocks until at least one byte is read or timeout.
 func (sp *SerialPort) Read(b []byte) (n int, err error) {
-	var done uint32
-	err = windows.ReadFile(sp.handle, b, &done, nil)
-	n = int(done)
-	return
+	return windows.Read(sp.handle, b)
 }
 
 // Write writes len(b) bytes to the serial port.
 // It returns the number of bytes (0 <= n <= len(b)) written to the serial port and any errors encountered.
 func (sp *SerialPort) Write(b []byte) (n int, err error) {
-	var done uint32
-	err = windows.WriteFile(sp.handle, b, &done, nil)
-	n = int(done)
-	return
-}
-
-func findMapKey(m map[int]uint8, value uint8) int {
-	for k, v := range m {
-		if v == value {
-			return k
-		}
-	}
-	return int(value)
+	return windows.Write(sp.handle, b)
 }
 
 // Config returns the configuration of the serial port.
-func (sp *SerialPort) Config() (Config, error) {
+func (sp *SerialPort) Config() (cfg Config, err error) {
 	dcb := win32DCB{DCBlength: uint32(unsafe.Sizeof(win32DCB{}))}
-	if err := win32GetCommState(sp.handle, &dcb); err != nil {
-		return Config{}, err
+	if err = win32GetCommState(sp.handle, &dcb); err != nil {
+		return
 	}
 	timeouts := windows.CommTimeouts{}
-	if err := windows.GetCommTimeouts(sp.handle, &timeouts); err != nil {
-		return Config{}, err
+	if err = windows.GetCommTimeouts(sp.handle, &timeouts); err != nil {
+		return
 	}
 
-	baudrate := int(dcb.BaudRate)
-	databits := findMapKey(dcbByteSizeMap, dcb.ByteSize)
-	stopbits := findMapKey(dcbStopBitsMap, dcb.StopBits)
-	parity := findMapKey(dcbParityMap, dcb.Parity)
-	timeout := time.Duration(timeouts.ReadTotalTimeoutConstant) * time.Millisecond
-	return Config{
-		BaudRate: baudrate,
-		DataBits: databits,
-		StopBits: stopbits,
-		Parity:   parity,
-		Timeout:  timeout,
-	}, nil
+	cfg = Config{
+		BaudRate: int(dcb.BaudRate),
+		DataBits: int(dcb.ByteSize),
+		StopBits: winToSpStopBitsMap[dcb.StopBits],
+		Parity:   int(dcb.Parity),
+		Timeout:  time.Duration(timeouts.ReadTotalTimeoutConstant) * time.Millisecond,
+	}
+
+	return
 }
 
 func checkConfigParam(cfg Config) error {
 	if cfg.BaudRate < 0 {
 		return fmt.Errorf("serialport: Config.BaudRate cannot be negative %v", cfg.BaudRate)
 	}
-	if _, ok := dcbByteSizeMap[cfg.DataBits]; !ok {
+
+	if cfg.DataBits != DB5 && cfg.DataBits != DB6 && cfg.DataBits != DB7 && cfg.DataBits != DB8 {
 		return fmt.Errorf("serialport: invalid Config.DataBits %v", cfg.DataBits)
 	}
-	if _, ok := dcbStopBitsMap[cfg.StopBits]; !ok {
+
+	if cfg.StopBits != SB1 && cfg.StopBits != SB1_5 && cfg.StopBits != SB2 {
 		return fmt.Errorf("serialport: invalid Config.StopBits %v", cfg.StopBits)
 	}
-	if _, ok := dcbParityMap[cfg.Parity]; !ok {
+
+	if cfg.Parity != PN && cfg.Parity != PO && cfg.Parity != PE && cfg.Parity != PM && cfg.Parity != PS {
 		return fmt.Errorf("serialport: invalid Config.Parity %v", cfg.Parity)
-	}
-	if cfg.Timeout != 0 && cfg.Timeout.Milliseconds() == 0 {
-		return fmt.Errorf("serialport: Config.Timeout on windows in milliseconds %v", cfg.Timeout)
 	}
 
 	return nil
@@ -219,23 +199,19 @@ func (sp *SerialPort) SetConfig(cfg Config) error {
 		return err
 	}
 
-	baudrate := uint32(cfg.BaudRate)
-	bytesize := dcbByteSizeMap[cfg.DataBits]
-	parity := dcbParityMap[cfg.Parity]
-	stopbits := dcbStopBitsMap[cfg.StopBits]
 	dcb := win32DCB{
 		DCBlength: uint32(unsafe.Sizeof(win32DCB{})),
-		BaudRate:  baudrate,
-		ByteSize:  bytesize,
-		Parity:    parity,
-		StopBits:  stopbits,
+		BaudRate:  uint32(cfg.BaudRate),
+		ByteSize:  uint8(cfg.DataBits),
+		Parity:    uint8(cfg.Parity),
+		StopBits:  spToWinStopBitsMap[cfg.StopBits],
 	}
 	if err := win32SetCommState(sp.handle, &dcb); err != nil {
 		return err
 	}
 
-	timeoutMs := uint32(cfg.Timeout.Milliseconds())
 	var commTimeouts windows.CommTimeouts
+	timeoutMs := uint32(cfg.Timeout.Milliseconds())
 	if timeoutMs > 0 {
 		commTimeouts = windows.CommTimeouts{
 			ReadIntervalTimeout:        math.MaxUint32,

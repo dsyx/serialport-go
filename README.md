@@ -9,14 +9,6 @@ A Go package that allows you to easily access serial ports.
 First you should prepare a serial port configuration `Config`:
 
 ```go
-// Config for serial port configuration:
-//     BaudRate is the baud rate of serial transmission
-//     DataBits is the number of bits per character
-//     StopBits is the number of stop bits
-//     Parity is a method of detecting errors in transmission
-//     Timeout is the serial port Read() timeout:
-//         <= 0: Read() will block until the specified number of characters are read
-//         > 0 : Read() will return as soon as a character is read, or until Timeout
 type Config struct {
 	BaudRate int
 	DataBits int
@@ -49,7 +41,6 @@ func DefaultConfig() Config {
 Then, call `Open` to open a serial port:
 
 ```go
-// Open opens a serial port.
 func Open(name string, cfg Config) (sp *SerialPort, err error) {
 	/* Code ... */
 }
