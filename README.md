@@ -63,7 +63,7 @@ import (
 )
 
 func main() {
-	sp, err := serialport.Open("COM1", DefaultConfig())
+	sp, err := serialport.Open("COM3", serialport.DefaultConfig())
 	if err != nil {
 		log.Fatalln(err)
 	}
