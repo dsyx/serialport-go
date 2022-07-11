@@ -67,11 +67,19 @@ const (
 	win32TWOSTOPBITS  = 2
 )
 
+const (
+	win32PURGE_RXABORT = 0x0002
+	win32PURGE_RXCLEAR = 0x0008
+	win32PURGE_TXABORT = 0x0001
+	win32PURGE_TXCLEAR = 0x0004
+)
+
 var (
 	modkernel32 = windows.NewLazySystemDLL("kernel32.dll")
 
 	procGetCommState = modkernel32.NewProc("GetCommState")
 	procSetCommState = modkernel32.NewProc("SetCommState")
+	procPurgeComm    = modkernel32.NewProc("PurgeComm")
 )
 
 // serialport stopbits to win32 stopbits
@@ -98,6 +106,14 @@ func win32GetCommState(handle windows.Handle, dcb *win32DCB) error {
 
 func win32SetCommState(handle windows.Handle, dcb *win32DCB) error {
 	r1, _, err := syscall.Syscall(procSetCommState.Addr(), 2, uintptr(handle), uintptr(unsafe.Pointer(dcb)), 0)
+	if r1 == 0 {
+		return err
+	}
+	return nil
+}
+
+func win32PurgeComm(handle windows.Handle, flags uint32) error {
+	r1, _, err := syscall.Syscall(procPurgeComm.Addr(), 2, uintptr(handle), uintptr(flags), 0)
 	if r1 == 0 {
 		return err
 	}
@@ -149,6 +165,11 @@ func (sp *SerialPort) Read(b []byte) (n int, err error) {
 // It returns the number of bytes (0 <= n <= len(b)) written to the serial port and any errors encountered.
 func (sp *SerialPort) Write(b []byte) (n int, err error) {
 	return windows.Write(sp.handle, b)
+}
+
+// Flush flushes both data received but not read, and data written but not transmitted.
+func (sp *SerialPort) Flush() error {
+	return win32PurgeComm(sp.handle, win32PURGE_RXABORT|win32PURGE_RXCLEAR|win32PURGE_TXABORT|win32PURGE_TXCLEAR)
 }
 
 // Config returns the configuration of the serial port.
