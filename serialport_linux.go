@@ -49,6 +49,11 @@ func (sp *SerialPort) Write(b []byte) (n int, err error) {
 	return unix.Write(sp.fd, b)
 }
 
+// Flush flushes both data received but not read, and data written but not transmitted.
+func (sp *SerialPort) Flush() error {
+	return unix.IoctlSetInt(sp.fd, unix.TCFLSH, unix.TCIOFLUSH)
+}
+
 // Config returns the configuration of the serial port.
 func (sp *SerialPort) Config() (cfg Config, err error) {
 	termios, err := unix.IoctlGetTermios(sp.fd, unix.TCGETS2)
